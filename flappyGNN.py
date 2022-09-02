@@ -6,9 +6,26 @@ from pygame.locals import *
 
 import numpy as np
 
-from ML.geneticNN import GeneticNN, sigmoid
+from ML.geneticNN import GeneticNN
 
-GNN = GeneticNN(50, [[2,5,2,1], sigmoid])
+gnn_params = dict()
+gnn_params['population'] = 50
+gnn_params['max_generation'] = -1
+gnn_params['max_fitness'] = -1
+gnn_params['elitism'] = 0.2
+gnn_params['mutation_rate'] = 0.1
+gnn_params['checkpoint'] = 10
+gnn_params['checkpoint_dir'] = 'checkpoints/test_3'
+
+nn_params = dict()
+nn_params['layers'] = [2,6,1]
+nn_params['activation'] = 'sigmoid'
+nn_params['weights'] = []
+
+gnn_params['nn_params'] = nn_params
+
+GNN = GeneticNN(gnn_params)
+GNN.load_checkpoint(GNN.checkpoint_dir + '/checkpoint_4.json')
 
 FPS = 30
 SCREENWIDTH  = 288.0
@@ -236,11 +253,12 @@ def mainGame(movementInfo):
     PLAYER_W_2 = IMAGES['player'][0].get_width() / 2
     PLAYER_H_2 = IMAGES['player'][0].get_height() / 2
 
-    PIPE_W_2 = IMAGES['pipe'][0].get_width() / 2
+    PIPE_W = IMAGES['pipe'][0].get_width()
+    PIPE_W_2 = PIPE_W / 2
     PIPEGAPSIZE_2 = PIPEGAPSIZE / 2
 
     pipe_idx = 0
-    pipe_gap_x = lowerPipes[pipe_idx]['x'] + PIPE_W_2
+    pipe_gap_x = lowerPipes[pipe_idx]['x'] + PIPE_W
     pipe_gap_y = lowerPipes[pipe_idx]['y'] - PIPEGAPSIZE_2
     
     MAX_PIPE_DIST = pipe_gap_x - playerx + PLAYER_W_2
@@ -260,13 +278,10 @@ def mainGame(movementInfo):
                 idxs = (alive_ids) & (y_pos > -2 * IMAGES['player'][0].get_height())
                 y_vel[idxs] = playerFlapAcc
                 flapped[idxs] = True"""
-        
-        ### PREDICT ACTION ###
-        # print("----PREDICTION----")
+
         for idx in list_alive:
             input = np.array([h_dist, v_dist[idx]])
             out = GNN.predict(idx, input)[0]
-            # print(idx, out)
             if out > 0.5 and (y_pos[idx] > -2 * IMAGES['player'][0].get_height()):
                 y_vel[idx] = playerFlapAcc
                 flapped[idx] = True
@@ -292,6 +307,7 @@ def mainGame(movementInfo):
             pipeMidPos = pipe['x'] + IMAGES['pipe'][0].get_width() / 2
             if pipeMidPos <= playerMidPos < pipeMidPos + 4:
                 score_vec[alive_ids] += 1
+            if pipe_gap_x <= playerMidPos < pipeMidPos + 4:
                 pipe_idx = 1
 
         # playerIndex basex change
@@ -312,7 +328,7 @@ def mainGame(movementInfo):
             uPipe['x'] += pipeVelX
             lPipe['x'] += pipeVelX
 
-        pipe_gap_x = lowerPipes[pipe_idx]['x'] + PIPE_W_2
+        pipe_gap_x = lowerPipes[pipe_idx]['x'] + PIPE_W
         pipe_gap_y = lowerPipes[pipe_idx]['y'] - PIPEGAPSIZE_2
 
         h_dist = (pipe_gap_x - playerx + PLAYER_W_2) / MAX_PIPE_DIST # horizontal distance to pipe gap
@@ -353,6 +369,8 @@ def mainGame(movementInfo):
         img_alive = font.render('Alive: ' + str(len(list_alive)) + '/' + str(GNN.population), True, (0,0,0))
         SCREEN.blit(img_alive, (5, 20))
 
+        pygame.draw.circle(SCREEN, (255,0,0), (pipe_gap_x, pipe_gap_y), 5)
+
         pygame.display.update()
         FPSCLOCK.tick(FPS)
         
@@ -367,10 +385,6 @@ def showGameOverScreen(crashInfo):
 
     next_gen, best = GNN.next_generation(fitness)
     print("BEST PLAYER:", best[0], "FITNESS:", best[2], "SCORE:", score[best[0]])
-    weights = best[1].get_weights()
-    with open('w' + str(GNN.current_generation-1) + '.txt', 'w') as f:
-        for w in weights:
-            f.write(f"{w.tolist()}\n")
 
     basex = crashInfo['basex']
 

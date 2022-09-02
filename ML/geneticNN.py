@@ -1,6 +1,9 @@
 import numpy as np
 import random
 
+from pathlib import Path
+import json
+
 def sigmoid(v: float) -> float:
     return 1.0 / (1.0 + np.exp(-v))
 
@@ -9,18 +12,28 @@ def tanh(v: float) -> float:
 
 class Layer(object):
     def __init__(self, input_size: int, output_size: int, activation: "function", weights: np.ndarray = np.array([])) -> None:
-        self.bias = 0.0 # np.random.rand(1, output_size) - 0.5
+        self.bias = np.zeros(output_size) # np.random.rand(1, output_size) - 0.5
         if weights.shape[0] > 0:
             self.weights = weights
         else:
-            self.weights = np.random.rand(input_size, output_size) - 0.5
+            self.weights = np.random.rand(output_size, input_size) - 0.5
         self.activation = np.vectorize(activation)
     
     def forward(self, input: np.ndarray) -> np.ndarray:
-        return self.activation(np.dot(input, self.weights) + self.bias)
+        return self.activation(np.dot(self.weights, input) + self.bias)
 
 class NeuralNetwork(object):
-    def __init__(self, layers: "list[int]", activation: "function", weights: "list[np.ndarray]" = []) -> None:
+    def __init__(self, nn_params: dict) -> None:
+        layers: list[int] = nn_params['layers']
+        weights: list[np.ndarray] = nn_params['weights']
+
+        if nn_params['activation'] == 'sigmoid':
+            activation = sigmoid
+        elif nn_params['activation'] == 'tanh':
+            activation = tanh
+        else:
+            raise Exception("This activation function does not exists")
+
         self.layers: list[Layer] = []
         
         _in = layers[0]
@@ -70,7 +83,7 @@ class Generation(object):
             id = self.sorted_ids[random.randint(0, int(population * elitism))]
             w = self.networks[id].get_weights()
             
-            self.mutation(w, 0.4)
+            self.mutation(w, mutation_rate)
             new_generation.append(w)
 
         ### crossover
@@ -118,37 +131,43 @@ class Generation(object):
                 w *= f
 
 class GeneticNN(object):
-    def __init__(self, population: int, nn_params: list, max_generation: int = -1, max_fitness: float = -1) -> None:
-        self.population = population
-        self.max_generation = max_generation
-        self.max_fitness = max_fitness
+    def __init__(self, gnn_params: dict) -> None:
+        self.population: int    =    gnn_params['population']
+        self.max_generation: int =   gnn_params['max_generation']
+        self.max_fitness: float =    gnn_params['max_fitness']
 
-        self.elitism = 0.2 # fraction of chromosomes to keep unchanged
-        self.mutation_rate = 0.1
+        self.checkpoint_dir: str = gnn_params['checkpoint_dir']
+        self.checkpoint: int = gnn_params['checkpoint']
 
-        self.nn_params = nn_params
+        self.elitism: float = gnn_params['elitism'] # fraction of chromosomes to keep unchanged
+        self.mutation_rate: float = gnn_params['mutation_rate']
+
+        self.nn_params: dict = gnn_params['nn_params']
         self.current_generation = 0
         self.generations: list[Generation] = []
     
     def predict(self, id: int, input: np.ndarray) -> np.ndarray:
-        return self.generations[self.current_generation-1].networks[id].predict(input)
+        return self.generations[-1].networks[id].predict(input)
 
     def get_best_NN(self) -> "tuple[int, NeuralNetwork, float]":
-        return self.generations[self.current_generation-1].get_best_NN()
+        return self.generations[-1].get_best_NN()
 
     def first_generation(self):
         self.current_generation = 1
-        networks = [NeuralNetwork(self.nn_params[0], self.nn_params[1]) for _ in range(self.population)]
+        networks = [NeuralNetwork(self.nn_params) for _ in range(self.population)]
         self.generations.append(Generation(networks))
 
     def next_generation(self, fitness: np.ndarray) -> "tuple[bool, tuple[int, NeuralNetwork, float]]":
-        last_gen = self.generations[self.current_generation-1]
+        last_gen = self.generations[-1]
         last_gen.add_fitness(fitness)
 
         sorted_ids = last_gen.sorted_ids
         max_score = last_gen.fitness[sorted_ids[0]]
 
         best = last_gen.get_best_NN()
+
+        if self.current_generation % self.checkpoint == 0:
+            self.save_checkpoint()
 
         if self.max_generation != -1 and self.current_generation == self.max_generation:
             print("Max Generation reached")
@@ -160,40 +179,92 @@ class GeneticNN(object):
         
         new_generation = last_gen.generate_new_generation(self.elitism, self.mutation_rate)
         
-        new_networks = [NeuralNetwork(self.nn_params[0], self.nn_params[1], weights=w) for w in new_generation]
+        new_networks = [NeuralNetwork(dict(self.nn_params, **{'weights':w})) for w in new_generation]
 
         self.current_generation += 1
         self.generations.append(Generation(new_networks))
         return True, best
+    
+    def save_checkpoint(self):
+        filename = self.checkpoint_dir + '/' + 'checkpoint_' + str(int(self.current_generation / self.checkpoint))
+        print("Saving checkpoint to " + filename)
 
+        last_gen = self.generations[-1]
+
+        data = dict()
+        data['generation'] = self.current_generation
+        data['fitness'] = last_gen.fitness.tolist()
+        data['nn_weights'] = dict()
+        for i, nn in zip(range(self.population), last_gen.networks):
+            weights = [w.tolist() for w in nn.get_weights()]
+            data['nn_weights'][i] = weights
+
+        Path(self.checkpoint_dir).mkdir(parents=True, exist_ok=True)
+        with open(filename + '.json', 'w') as f:
+            json.dump(data, f)
+
+        # np.savetxt(dir_base + '/' + 'fitness.txt', last_gen.fitness)
+        """with open(dir_base + '/' + 'weights.txt', 'w') as f:
+            for nn in last_gen.networks:
+                weights = [w.tolist() for w in nn.get_weights()]
+                f.write(str(weights) + "\n")"""
+        """with open(dir_base + '/' + 'weights.json', 'w') as f:
+            data = dict()
+            for i, nn in zip(range(self.population), last_gen.networks):
+                weights = [w.tolist() for w in nn.get_weights()]
+                data[i] = weights
+            json.dump(data, f)"""
+    
+    def load_checkpoint(self, checkpoint_file: str):
+        with open(checkpoint_file, 'r') as f:
+            data: dict = json.load(f)
+            self.current_generation = data['generation']
             
+            nn_weights = data['nn_weights']
+            weights = [[np.array(w) for w in net_w] for _, net_w in nn_weights.items()]
+            networks = [NeuralNetwork(dict(self.nn_params, **{'weights':w})) for w in weights]
+            
+            fitness = data['fitness']
+            self.generations.append(Generation(networks))
+            self.generations[-1].fitness = fitness
+            
+
 
 if __name__ == "__main__":
     gnn_params = dict()
-    gnn_params['population'] = 50
-    gnn_params['max_generation'] = -1
+    gnn_params['population'] = 5
+    gnn_params['max_generation'] = 10
     gnn_params['max_fitness'] = -1
     gnn_params['elitism'] = 0.2
     gnn_params['mutation_rate'] = 0.1
-    gnn_params['checkpoint'] = 10
+    gnn_params['checkpoint'] = 2
+    gnn_params['checkpoint_dir'] = '/home/nacho/Flappy-bird-ML/checkpoints/test'
 
     nn_params = dict()
     nn_params['layers'] = [2,5,2,1]
     nn_params['activation'] = 'sigmoid'
+    nn_params['weights'] = []
 
     gnn_params['nn_params'] = nn_params
 
-    net = NeuralNetwork([5,4,2,1], sigmoid)
-    input = np.array([1,1,0,1,0])
-    print(net.predict(input))
-    weights = net.get_weights()
-    net2 = NeuralNetwork([5,4,2,1], sigmoid)
-    print(net2.predict(input))
-
-    gnn = GeneticNN(10, [[5,4,2,1], sigmoid], max_generation=10, max_fitness=0.95)
+    gnn = GeneticNN(gnn_params)
     gnn.first_generation()
-    end = False
-    while not end:
+    next_gen = True
+    while next_gen:
         print("gen: ", gnn.current_generation, "/", 10)
-        end = not gnn.next_generation(np.random.rand(10))
+        fitness = np.random.rand(gnn.population)
+        next_gen, best = gnn.next_generation(fitness)
+    
+    print("Test predict")
+    print(gnn.generations[-1].fitness)
+    input_test = np.array([0.5, -0.5])
+    for i in range(gnn.population):
+        print(i, gnn.predict(i, input_test))
+    
+    print("Load checkpoint")
+    gnn_2 = GeneticNN(gnn_params)
+    gnn_2.load_checkpoint(gnn.checkpoint_dir + '/checkpoint_5.json')
+    print(gnn_2.generations[-1].fitness)
+    for i in range(gnn_2.population):
+        print(i, gnn_2.predict(i, input_test))
 
