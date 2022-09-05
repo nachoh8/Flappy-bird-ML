@@ -12,7 +12,7 @@ def tanh(v: float) -> float:
 
 class Layer(object):
     def __init__(self, input_size: int, output_size: int, activation: "function", weights: np.ndarray = np.array([])) -> None:
-        self.bias = np.zeros(output_size) # np.random.rand(1, output_size) - 0.5
+        self.bias = np.zeros(output_size)
         if weights.shape[0] > 0:
             self.weights = weights
         else:
@@ -152,6 +152,17 @@ class GeneticNN(object):
     def get_best_NN(self) -> "tuple[int, NeuralNetwork, float]":
         return self.generations[-1].get_best_NN()
 
+    def fitness_elitism_generations(self):
+        if len(self.generations) < 2:
+            return None
+        
+        prev_gen = self.generations[-2]
+        current_gen = self.generations[-1]
+        n = int(self.population * self.elitism)
+        fitness_diff = [(prev_gen.fitness[prev_gen.sorted_ids[idx]], current_gen.fitness[idx]) for idx in range(n)]
+
+        return fitness_diff
+
     def first_generation(self):
         self.current_generation = 1
         networks = [NeuralNetwork(self.nn_params) for _ in range(self.population)]
@@ -161,12 +172,15 @@ class GeneticNN(object):
         last_gen = self.generations[-1]
         last_gen.add_fitness(fitness)
 
+        print("Diff fitness (top genes)")
+        print(self.fitness_elitism_generations())
+
         sorted_ids = last_gen.sorted_ids
         max_score = last_gen.fitness[sorted_ids[0]]
 
         best = last_gen.get_best_NN()
 
-        if self.current_generation % self.checkpoint == 0:
+        if self.checkpoint_dir != '' and self.current_generation % self.checkpoint == 0:
             self.save_checkpoint()
 
         if self.max_generation != -1 and self.current_generation == self.max_generation:

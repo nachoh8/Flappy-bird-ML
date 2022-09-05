@@ -14,7 +14,7 @@ gnn_params['max_generation'] = -1
 gnn_params['max_fitness'] = -1
 gnn_params['elitism'] = 0.2
 gnn_params['mutation_rate'] = 0.1
-gnn_params['checkpoint'] = 10
+gnn_params['checkpoint'] = 5
 gnn_params['checkpoint_dir'] = 'checkpoints/test_3'
 
 nn_params = dict()
@@ -25,7 +25,7 @@ nn_params['weights'] = []
 gnn_params['nn_params'] = nn_params
 
 GNN = GeneticNN(gnn_params)
-GNN.load_checkpoint(GNN.checkpoint_dir + '/checkpoint_4.json')
+GNN.load_checkpoint(GNN.checkpoint_dir + '/checkpoint_10_old.json')
 
 FPS = 30
 SCREENWIDTH  = 288.0
@@ -69,6 +69,8 @@ PIPES_LIST = (
     'assets/sprites/pipe-red.png',
 )
 
+MAX_SCORE = (0,0) # score, generation
+
 
 try:
     xrange
@@ -104,7 +106,8 @@ def main():
     # base (ground) sprite
     IMAGES['base'] = pygame.image.load('assets/sprites/base.png').convert_alpha()
 
-    GNN.first_generation()
+    if GNN.current_generation == 0:
+        GNN.first_generation()
     end = False
     while not end:
         # select random background sprites
@@ -207,6 +210,7 @@ def showWelcomeAnimation():
 
 
 def mainGame(movementInfo):
+    global MAX_SCORE
     playerIndex = loopIter = 0
     playerIndexGen = movementInfo['playerIndexGen']
     playerx, playery = int(SCREENWIDTH * 0.2), movementInfo['playery']
@@ -368,6 +372,8 @@ def mainGame(movementInfo):
         SCREEN.blit(img_gen, (5, 5))
         img_alive = font.render('Alive: ' + str(len(list_alive)) + '/' + str(GNN.population), True, (0,0,0))
         SCREEN.blit(img_alive, (5, 20))
+        img_best_score = font.render('Best score: ' + str(MAX_SCORE[0]) + '(Gen ' + str(MAX_SCORE[1]) + ')', True, (0,0,0))
+        SCREEN.blit(img_best_score, (5, 35))
 
         pygame.draw.circle(SCREEN, (255,0,0), (pipe_gap_x, pipe_gap_y), 5)
 
@@ -378,10 +384,15 @@ def mainGame(movementInfo):
 
 
 def showGameOverScreen(crashInfo):
+    global MAX_SCORE
+
     """crashes the player down and shows gameover image"""
     score = crashInfo['score']
     max_score = int(np.max(score))
     fitness = crashInfo['fitness']
+
+    if max_score > MAX_SCORE[0]:
+        MAX_SCORE = (max_score, GNN.current_generation)
 
     next_gen, best = GNN.next_generation(fitness)
     print("BEST PLAYER:", best[0], "FITNESS:", best[2], "SCORE:", score[best[0]])
