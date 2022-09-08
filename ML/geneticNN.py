@@ -25,7 +25,12 @@ class Layer(object):
 class NeuralNetwork(object):
     def __init__(self, nn_params: dict) -> None:
         layers: list[int] = nn_params['layers']
-        weights: list[np.ndarray] = nn_params['weights']
+        if 'weights' in nn_params:
+            weights: list[np.ndarray] = nn_params['weights']
+            if type(weights[0]) is not np.ndarray:
+                weights = [np.array(w) for w in weights]
+        else:
+            weights: list[np.ndarray] = []
 
         if nn_params['activation'] == 'sigmoid':
             activation = sigmoid
@@ -141,10 +146,17 @@ class GeneticNN(object):
 
         self.elitism: float = gnn_params['elitism'] # fraction of chromosomes to keep unchanged
         self.mutation_rate: float = gnn_params['mutation_rate']
+        self.use_prev_res: bool = gnn_params['use_prev_res']
+        self.discount_prev_res: float = gnn_params['discount_prev_res']
 
         self.nn_params: dict = gnn_params['nn_params']
         self.current_generation = 0
         self.generations: list[Generation] = []
+
+        if "checkpoint_file" in gnn_params:
+            f = gnn_params['checkpoint_file']
+            if f != '':
+                self.load_checkpoint()
     
     def predict(self, id: int, input: np.ndarray) -> np.ndarray:
         return self.generations[-1].networks[id].predict(input)
@@ -170,6 +182,13 @@ class GeneticNN(object):
 
     def next_generation(self, fitness: np.ndarray) -> "tuple[bool, tuple[int, NeuralNetwork, float]]":
         last_gen = self.generations[-1]
+
+        if self.use_prev_res and len(self.generations) > 1:
+            g_prev = self.generations[-2]
+            prev_best = [g_prev.sorted_ids[i] for i in range(int(self.population * self.elitism))]
+            curr_best = [i for i in range(int(self.population * self.elitism))]
+            fitness[curr_best] += g_prev.fitness[prev_best] * self.discount_prev_res
+
         last_gen.add_fitness(fitness)
 
         print("Diff fitness (top genes)")
@@ -200,7 +219,7 @@ class GeneticNN(object):
         return True, best
     
     def save_checkpoint(self):
-        filename = self.checkpoint_dir + '/' + 'checkpoint_' + str(int(self.current_generation / self.checkpoint))
+        filename = self.checkpoint_dir + '/checkpoint_' + str(int(self.current_generation / self.checkpoint))
         print("Saving checkpoint to " + filename)
 
         last_gen = self.generations[-1]
@@ -216,19 +235,21 @@ class GeneticNN(object):
         Path(self.checkpoint_dir).mkdir(parents=True, exist_ok=True)
         with open(filename + '.json', 'w') as f:
             json.dump(data, f)
-
-        # np.savetxt(dir_base + '/' + 'fitness.txt', last_gen.fitness)
-        """with open(dir_base + '/' + 'weights.txt', 'w') as f:
-            for nn in last_gen.networks:
-                weights = [w.tolist() for w in nn.get_weights()]
-                f.write(str(weights) + "\n")"""
-        """with open(dir_base + '/' + 'weights.json', 'w') as f:
-            data = dict()
-            for i, nn in zip(range(self.population), last_gen.networks):
-                weights = [w.tolist() for w in nn.get_weights()]
-                data[i] = weights
-            json.dump(data, f)"""
+        
+        self.save_best_nn()
     
+    def save_best_nn(self):
+        filename = self.checkpoint_dir + "/best_nn_G" + str(self.current_generation) + ".json"
+        print("Saving best NN to " + filename)
+
+        data = self.nn_params.copy()
+        nn_id, nn, fitness = self.get_best_NN()
+        data['generation'] = self.current_generation
+        data['fitness'] = fitness
+        data['weights'] = [w.tolist() for w in nn.get_weights()]
+        with open(filename, 'w') as f:
+            json.dump(data, f)
+
     def load_checkpoint(self, checkpoint_file: str):
         with open(checkpoint_file, 'r') as f:
             data: dict = json.load(f)
@@ -240,9 +261,12 @@ class GeneticNN(object):
             
             fitness = data['fitness']
             self.generations.append(Generation(networks))
-            self.generations[-1].fitness = fitness
-            
 
+            temp = self.checkpoint_dir
+            self.checkpoint_dir = ''
+            self.next_generation(fitness)
+            self.checkpoint_dir = temp
+            
 
 if __name__ == "__main__":
     gnn_params = dict()

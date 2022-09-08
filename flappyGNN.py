@@ -1,31 +1,19 @@
 from itertools import cycle
+import json
 import random
 import sys
 import pygame
 from pygame.locals import *
 
 import numpy as np
+import argparse
 
-from ML.geneticNN import GeneticNN
+from ML.geneticNN import GeneticNN, NeuralNetwork
 
-gnn_params = dict()
-gnn_params['population'] = 50
-gnn_params['max_generation'] = -1
-gnn_params['max_fitness'] = -1
-gnn_params['elitism'] = 0.2
-gnn_params['mutation_rate'] = 0.1
-gnn_params['checkpoint'] = 5
-gnn_params['checkpoint_dir'] = 'checkpoints/test_3'
-
-nn_params = dict()
-nn_params['layers'] = [2,6,1]
-nn_params['activation'] = 'sigmoid'
-nn_params['weights'] = []
-
-gnn_params['nn_params'] = nn_params
-
-GNN = GeneticNN(gnn_params)
-GNN.load_checkpoint(GNN.checkpoint_dir + '/checkpoint_10_old.json')
+GNN: GeneticNN = None
+NN: NeuralNetwork = None
+ATTEMP = 0
+TRAINING = True
 
 FPS = 30
 SCREENWIDTH  = 288.0
@@ -106,7 +94,7 @@ def main():
     # base (ground) sprite
     IMAGES['base'] = pygame.image.load('assets/sprites/base.png').convert_alpha()
 
-    if GNN.current_generation == 0:
+    if TRAINING and GNN.current_generation == 0:
         GNN.first_generation()
     end = False
     while not end:
@@ -169,7 +157,10 @@ def showWelcomeAnimation():
     # player shm for up-down motion on welcome screen
     playerShmVals = {'val': 0, 'dir': 1}
 
-    first_gen = GNN.current_generation == 1
+    if TRAINING:
+        first_gen = GNN.current_generation == 1
+    else:
+        first_gen = False
     t = 0
     while first_gen or (t < 10 and not first_gen):
         for event in pygame.event.get():
@@ -210,7 +201,7 @@ def showWelcomeAnimation():
 
 
 def mainGame(movementInfo):
-    global MAX_SCORE
+    global MAX_SCORE, ATTEMP
     playerIndex = loopIter = 0
     playerIndexGen = movementInfo['playerIndexGen']
     playerx, playery = int(SCREENWIDTH * 0.2), movementInfo['playery']
@@ -244,15 +235,17 @@ def mainGame(movementInfo):
     playerFlapAcc =  -9.0   # players speed on flapping
     # playerFlapped = False # True when player flaps
 
-    alive_ids = np.full(GNN.population, True)
+    population = GNN.population if TRAINING else 1
+
+    alive_ids = np.full(population, True)
     list_alive = np.where(alive_ids)[0].tolist()
-    fitness = np.zeros(GNN.population)
-    score_vec = np.zeros(GNN.population)
+    fitness = np.zeros(population)
+    score_vec = np.zeros(population)
 
-    flapped = np.full(GNN.population, False)
+    flapped = np.full(population, False)
 
-    y_pos = np.full(GNN.population, float(playery)) # position on Y
-    y_vel = np.full(GNN.population, playerVelY) # velocity on Y
+    y_pos = np.full(population, float(playery)) # position on Y
+    y_vel = np.full(population, playerVelY) # velocity on Y
     
     PLAYER_W_2 = IMAGES['player'][0].get_width() / 2
     PLAYER_H_2 = IMAGES['player'][0].get_height() / 2
@@ -268,10 +261,14 @@ def mainGame(movementInfo):
     MAX_PIPE_DIST = pipe_gap_x - playerx + PLAYER_W_2
 
     h_dist = (pipe_gap_x - playerx + PLAYER_W_2) / MAX_PIPE_DIST # horizontal distance to pipe gap
-    v_dist = np.full(GNN.population, (pipe_gap_y - y_pos + PLAYER_H_2) / SCREENHEIGHT) # vertical distance to pipe gap
+    v_dist = np.full(population, (pipe_gap_y - y_pos + PLAYER_H_2) / SCREENHEIGHT) # vertical distance to pipe gap
 
     print("----------------------------------------------------")
-    print("Generation:", GNN.current_generation)
+    if TRAINING:
+        print("Generation:", GNN.current_generation)
+    else:
+        ATTEMP += 1
+        print("Playing with a NN, attemp:", ATTEMP)
 
     while True:
         for event in pygame.event.get():
@@ -285,7 +282,10 @@ def mainGame(movementInfo):
 
         for idx in list_alive:
             input = np.array([h_dist, v_dist[idx]])
-            out = GNN.predict(idx, input)[0]
+            if TRAINING:
+                out = GNN.predict(idx, input)[0]
+            else:
+                out = NN.predict(input)[0]
             if out > 0.5 and (y_pos[idx] > -2 * IMAGES['player'][0].get_height()):
                 y_vel[idx] = playerFlapAcc
                 flapped[idx] = True
@@ -295,7 +295,7 @@ def mainGame(movementInfo):
         list_alive = np.where(alive_ids)[0].tolist()
         
         if len(list_alive) == 0:
-            print([(idx, fitness[idx], score_vec[idx]) for idx in range(GNN.population)])
+            print([(idx, fitness[idx], score_vec[idx]) for idx in range(population)])
 
             return {
                 'basex': basex,
@@ -368,12 +368,18 @@ def mainGame(movementInfo):
 
         # draw info
         font = pygame.font.SysFont(None, 24)
-        img_gen = font.render('Generation: ' + str(GNN.current_generation), True, (0,0,0))
-        SCREEN.blit(img_gen, (5, 5))
-        img_alive = font.render('Alive: ' + str(len(list_alive)) + '/' + str(GNN.population), True, (0,0,0))
-        SCREEN.blit(img_alive, (5, 20))
-        img_best_score = font.render('Best score: ' + str(MAX_SCORE[0]) + '(Gen ' + str(MAX_SCORE[1]) + ')', True, (0,0,0))
-        SCREEN.blit(img_best_score, (5, 35))
+        if TRAINING:
+            img_gen = font.render('Generation: ' + str(GNN.current_generation), True, (0,0,0))
+            img_alive = font.render('Alive: ' + str(len(list_alive)) + '/' + str(population), True, (0,0,0))
+            img_best_score = font.render('Best score: ' + str(MAX_SCORE[0]) + '(Gen ' + str(MAX_SCORE[1]) + ')', True, (0,0,0))
+            SCREEN.blit(img_gen, (5, 5))
+            SCREEN.blit(img_alive, (5, 20))
+            SCREEN.blit(img_best_score, (5, 35))
+        else:
+            img_gen = font.render('Attemp: ' + str(ATTEMP), True, (0,0,0))
+            img_best_score = font.render('Best score: ' + str(MAX_SCORE[0]) + '(Attemp ' + str(MAX_SCORE[1]) + ')', True, (0,0,0))
+            SCREEN.blit(img_gen, (5, 5))
+            SCREEN.blit(img_best_score, (5, 20))
 
         pygame.draw.circle(SCREEN, (255,0,0), (pipe_gap_x, pipe_gap_y), 5)
 
@@ -392,10 +398,20 @@ def showGameOverScreen(crashInfo):
     fitness = crashInfo['fitness']
 
     if max_score > MAX_SCORE[0]:
-        MAX_SCORE = (max_score, GNN.current_generation)
+        if TRAINING:
+            MAX_SCORE = (max_score, GNN.current_generation)
+        else:
+            MAX_SCORE = (max_score, ATTEMP)
 
-    next_gen, best = GNN.next_generation(fitness)
-    print("BEST PLAYER:", best[0], "FITNESS:", best[2], "SCORE:", score[best[0]])
+    if TRAINING:
+        best_player = np.argmax(fitness)
+        print("BEST PLAYER:", best_player, "FITNESS:", fitness[best_player], "SCORE:", score[best_player])
+        next_gen, best = GNN.next_generation(fitness)
+        if GNN.use_prev_res:
+            print("BEST PLAYER (Final):", best[0], "FITNESS:", best[2], "SCORE:", score[best[0]])
+    else:
+        next_gen = True
+        print("Attemp: " + str(ATTEMP)  + "| Score:" + str(score[0]))
 
     basex = crashInfo['basex']
 
@@ -534,4 +550,24 @@ def getHitmask(image):
 
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='Flappy Bird - GNN')
+    parser.add_argument("-train", type=str, help="GNN params file", metavar='<gnn_params_file>')
+    parser.add_argument("-play", type=str, help="NN params file", metavar='<nn_params_file>')
+
+    args = parser.parse_args()
+
+    if args.train: # train GNN
+        f = open(args.train, 'r')
+        gnn_params = json.load(f)
+        GNN = GeneticNN(gnn_params)
+        TRAINING = True
+    elif args.play: # play with a NN
+        f = open(args.play, 'r')
+        nn_params = json.load(f)
+        NN = NeuralNetwork(nn_params)
+        TRAINING = False
+    else:
+        print("Error in number of params: python (-train <gnn_params_file> | -play <nn_params_file>)")
+        exit(-1)
+
     main()
