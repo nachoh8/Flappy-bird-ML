@@ -406,8 +406,8 @@ def showGameOverScreen(crashInfo):
     if TRAINING:
         best_player = np.argmax(fitness)
         print("BEST PLAYER:", best_player, "FITNESS:", fitness[best_player], "SCORE:", score[best_player])
-        next_gen, best = GNN.next_generation(fitness)
-        if GNN.use_prev_res:
+        next_gen, best = GNN.next_generation(fitness, score)
+        if GNN.discount_prev_res > 0.0:
             print("BEST PLAYER (Final):", best[0], "FITNESS:", best[2], "SCORE:", score[best[0]])
     else:
         next_gen = True

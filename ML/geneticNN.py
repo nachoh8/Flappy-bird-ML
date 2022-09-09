@@ -65,14 +65,16 @@ class Generation(object):
     def __init__(self, networks: "list[NeuralNetwork]") -> None:
         self.networks = networks
         self.fitness: np.ndarray = np.zeros(len(networks))
+        self.score: np.ndarray = np.zeros(len(networks))
         self.sorted_ids: np.ndarray = np.full(len(networks), -1)
     
-    def add_fitness(self, fitness: np.ndarray):
+    def add_fitness(self, fitness: np.ndarray, score: np.ndarray):
         self.fitness = fitness
+        self.score = score
         self.sorted_ids = np.argsort(self.fitness)[::-1] # in descending order
     
-    def get_best_NN(self) -> "tuple[int, NeuralNetwork, float]":
-        return (self.sorted_ids[0], self.networks[self.sorted_ids[0]], self.fitness[self.sorted_ids[0]])
+    def get_best_NN(self) -> "tuple[int, NeuralNetwork, float, float]":
+        return (self.sorted_ids[0], self.networks[self.sorted_ids[0]], self.fitness[self.sorted_ids[0]], self.score[self.sorted_ids[0]])
     
     def generate_new_generation(self, elitism: float, mutation_rate: float) -> "list[list[np.ndarray]]":
         ### rank-based selection ###
@@ -88,7 +90,7 @@ class Generation(object):
             id = self.sorted_ids[random.randint(0, int(population * elitism))]
             w = self.networks[id].get_weights()
             
-            self.mutation(w, mutation_rate)
+            self.mutation(w, 0.2 + mutation_rate)
             new_generation.append(w)
 
         ### crossover
@@ -146,7 +148,6 @@ class GeneticNN(object):
 
         self.elitism: float = gnn_params['elitism'] # fraction of chromosomes to keep unchanged
         self.mutation_rate: float = gnn_params['mutation_rate']
-        self.use_prev_res: bool = gnn_params['use_prev_res']
         self.discount_prev_res: float = gnn_params['discount_prev_res']
 
         self.nn_params: dict = gnn_params['nn_params']
@@ -161,7 +162,7 @@ class GeneticNN(object):
     def predict(self, id: int, input: np.ndarray) -> np.ndarray:
         return self.generations[-1].networks[id].predict(input)
 
-    def get_best_NN(self) -> "tuple[int, NeuralNetwork, float]":
+    def get_best_NN(self) -> "tuple[int, NeuralNetwork, float, float]":
         return self.generations[-1].get_best_NN()
 
     def fitness_elitism_generations(self):
@@ -180,16 +181,16 @@ class GeneticNN(object):
         networks = [NeuralNetwork(self.nn_params) for _ in range(self.population)]
         self.generations.append(Generation(networks))
 
-    def next_generation(self, fitness: np.ndarray) -> "tuple[bool, tuple[int, NeuralNetwork, float]]":
+    def next_generation(self, fitness: np.ndarray, score: np.ndarray) -> "tuple[bool, tuple[int, NeuralNetwork, float, float]]":
         last_gen = self.generations[-1]
 
-        if self.use_prev_res and len(self.generations) > 1:
+        if self.discount_prev_res > 0.0 and len(self.generations) > 1:
             g_prev = self.generations[-2]
             prev_best = [g_prev.sorted_ids[i] for i in range(int(self.population * self.elitism))]
             curr_best = [i for i in range(int(self.population * self.elitism))]
             fitness[curr_best] += g_prev.fitness[prev_best] * self.discount_prev_res
 
-        last_gen.add_fitness(fitness)
+        last_gen.add_fitness(fitness, score)
 
         print("Diff fitness (top genes)")
         print(self.fitness_elitism_generations())
@@ -227,6 +228,7 @@ class GeneticNN(object):
         data = dict()
         data['generation'] = self.current_generation
         data['fitness'] = last_gen.fitness.tolist()
+        data['score'] = last_gen.score.tolist()
         data['nn_weights'] = dict()
         for i, nn in zip(range(self.population), last_gen.networks):
             weights = [w.tolist() for w in nn.get_weights()]
@@ -243,9 +245,10 @@ class GeneticNN(object):
         print("Saving best NN to " + filename)
 
         data = self.nn_params.copy()
-        nn_id, nn, fitness = self.get_best_NN()
+        _, nn, fitness, score = self.get_best_NN()
         data['generation'] = self.current_generation
         data['fitness'] = fitness
+        data['score'] = score
         data['weights'] = [w.tolist() for w in nn.get_weights()]
         with open(filename, 'w') as f:
             json.dump(data, f)
@@ -260,11 +263,12 @@ class GeneticNN(object):
             networks = [NeuralNetwork(dict(self.nn_params, **{'weights':w})) for w in weights]
             
             fitness = data['fitness']
+            score = data['score']
             self.generations.append(Generation(networks))
 
             temp = self.checkpoint_dir
             self.checkpoint_dir = ''
-            self.next_generation(fitness)
+            self.next_generation(fitness, score)
             self.checkpoint_dir = temp
             
 

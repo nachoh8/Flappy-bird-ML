@@ -4,10 +4,9 @@
     "max_fitness": -1,
     "elitism": 0.2,
     "mutation_rate": 0.1,
-    "use_prev_res": true,
     "discount_prev_res": 0.3,
     "checkpoint": 5,
-    "checkpoint_dir": "checkpoints/test_4",
+    "checkpoint_dir": "checkpoints/test_5",
     "checkpoint_file": "",
     "nn_params": {
         "layers": [2, 6, 1],
