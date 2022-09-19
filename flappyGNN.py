@@ -12,8 +12,8 @@ from ML.geneticNN import GeneticNN, NeuralNetwork
 
 GNN: GeneticNN = None
 NN: NeuralNetwork = None
-ATTEMP = 0
 TRAINING = True
+N_INPUTS = 0
 
 FPS = 30
 SCREENWIDTH  = 288.0
@@ -58,6 +58,9 @@ PIPES_LIST = (
 )
 
 MAX_SCORE = (0,0) # score, generation
+AVG_SCORE = []
+ATTEMP = 0
+MAX_ATTEMPS = 50
 
 
 try:
@@ -158,7 +161,7 @@ def showWelcomeAnimation():
     playerShmVals = {'val': 0, 'dir': 1}
 
     if TRAINING:
-        first_gen = GNN.current_generation == 1
+        first_gen = GNN.current_generation == 1 and GNN.current_game == 0
     else:
         first_gen = False
     t = 0
@@ -255,20 +258,21 @@ def mainGame(movementInfo):
     PIPEGAPSIZE_2 = PIPEGAPSIZE / 2
 
     pipe_idx = 0
-    pipe_gap_x = lowerPipes[pipe_idx]['x'] + PIPE_W
+    pipe_gap_x = lowerPipes[pipe_idx]['x']
     pipe_gap_y = lowerPipes[pipe_idx]['y'] - PIPEGAPSIZE_2
     
     MAX_PIPE_DIST = pipe_gap_x - playerx + PLAYER_W_2
 
-    h_dist = (pipe_gap_x - playerx + PLAYER_W_2) / MAX_PIPE_DIST # horizontal distance to pipe gap
+    i_h_dist = (pipe_gap_x - playerx + PLAYER_W_2) / MAX_PIPE_DIST # horizontal distance to initial pipe gap
+    f_h_dist = (pipe_gap_x + PIPE_W - playerx + PLAYER_W_2) / MAX_PIPE_DIST # horizontal distance to final pipe gap
     v_dist = np.full(population, (pipe_gap_y - y_pos + PLAYER_H_2) / SCREENHEIGHT) # vertical distance to pipe gap
 
     print("----------------------------------------------------")
     if TRAINING:
-        print("Generation:", GNN.current_generation)
+        print("Generation: ", GNN.current_generation, " | Game:", GNN.current_game+1, "/", GNN.fitness_avg_games)
     else:
         ATTEMP += 1
-        print("Playing with a NN, attemp:", ATTEMP)
+        print("Attemp: ", ATTEMP, "/", MAX_ATTEMPS)
 
     while True:
         for event in pygame.event.get():
@@ -281,7 +285,13 @@ def mainGame(movementInfo):
                 flapped[idxs] = True"""
 
         for idx in list_alive:
-            input = np.array([h_dist, v_dist[idx]])
+            if N_INPUTS == 3:
+                input = np.array([i_h_dist, f_h_dist, v_dist[idx]])
+            elif N_INPUTS == 2:
+                input = np.array([f_h_dist, v_dist[idx]])
+            else:
+                raise Exception("This NN " + str(GNN.nn_params['layers']) + "is not compatible")
+            
             if TRAINING:
                 out = GNN.predict(idx, input)[0]
             else:
@@ -311,7 +321,7 @@ def mainGame(movementInfo):
             pipeMidPos = pipe['x'] + IMAGES['pipe'][0].get_width() / 2
             if pipeMidPos <= playerMidPos < pipeMidPos + 4:
                 score_vec[alive_ids] += 1
-            if pipe_gap_x <= playerMidPos < pipeMidPos + 4:
+            if pipe_gap_x + PIPE_W <= playerMidPos < pipeMidPos + 4:
                 pipe_idx = 1
 
         # playerIndex basex change
@@ -332,10 +342,11 @@ def mainGame(movementInfo):
             uPipe['x'] += pipeVelX
             lPipe['x'] += pipeVelX
 
-        pipe_gap_x = lowerPipes[pipe_idx]['x'] + PIPE_W
+        pipe_gap_x = lowerPipes[pipe_idx]['x']
         pipe_gap_y = lowerPipes[pipe_idx]['y'] - PIPEGAPSIZE_2
 
-        h_dist = (pipe_gap_x - playerx + PLAYER_W_2) / MAX_PIPE_DIST # horizontal distance to pipe gap
+        i_h_dist = (pipe_gap_x - playerx + PLAYER_W_2) / MAX_PIPE_DIST # horizontal distance to initial pipe gap
+        f_h_dist = (pipe_gap_x  + PIPE_W - playerx + PLAYER_W_2) / MAX_PIPE_DIST # horizontal distance to pipe gap
         v_dist[alive_ids] = (pipe_gap_y - y_pos[alive_ids] + PLAYER_H_2) / SCREENHEIGHT # vertical distance to pipe gap
 
         # add new pipe when first pipe is about to touch left of screen
@@ -369,19 +380,26 @@ def mainGame(movementInfo):
         # draw info
         font = pygame.font.SysFont(None, 24)
         if TRAINING:
-            img_gen = font.render('Generation: ' + str(GNN.current_generation), True, (0,0,0))
+            img_gen = font.render('Generation: ' + str(GNN.current_generation) + " (Game: " + str(GNN.current_game+1) + "/" + str(GNN.fitness_avg_games) + ')', True, (0,0,0))
             img_alive = font.render('Alive: ' + str(len(list_alive)) + '/' + str(population), True, (0,0,0))
             img_best_score = font.render('Best score: ' + str(MAX_SCORE[0]) + '(Gen ' + str(MAX_SCORE[1]) + ')', True, (0,0,0))
             SCREEN.blit(img_gen, (5, 5))
             SCREEN.blit(img_alive, (5, 20))
             SCREEN.blit(img_best_score, (5, 35))
         else:
-            img_gen = font.render('Attemp: ' + str(ATTEMP), True, (0,0,0))
-            img_best_score = font.render('Best score: ' + str(MAX_SCORE[0]) + '(Attemp ' + str(MAX_SCORE[1]) + ')', True, (0,0,0))
+            img_gen = font.render('Attemp: ' + str(ATTEMP) + "/" + str(MAX_ATTEMPS), True, (0,0,0))
+            img_best_score = font.render('Best score: ' + str(MAX_SCORE[0]) + ' (Attemp ' + str(MAX_SCORE[1]) + ')', True, (0,0,0))
+            if len(AVG_SCORE) > 0:
+                img_avg_score = font.render('Average score: ' + str(np.mean(AVG_SCORE)), True, (0,0,0))
+            else:
+                img_avg_score = font.render('Average score: ' + str(0), True, (0,0,0))
             SCREEN.blit(img_gen, (5, 5))
             SCREEN.blit(img_best_score, (5, 20))
+            SCREEN.blit(img_avg_score, (5, 35))
 
-        pygame.draw.circle(SCREEN, (255,0,0), (pipe_gap_x, pipe_gap_y), 5)
+        if N_INPUTS == 3:
+            pygame.draw.circle(SCREEN, (0,255,0), (pipe_gap_x, pipe_gap_y), 5)
+        pygame.draw.circle(SCREEN, (255,0,0), (pipe_gap_x+ PIPE_W, pipe_gap_y), 5)
 
         pygame.display.update()
         FPSCLOCK.tick(FPS)
@@ -390,7 +408,7 @@ def mainGame(movementInfo):
 
 
 def showGameOverScreen(crashInfo):
-    global MAX_SCORE
+    global MAX_SCORE, AVG_SCORE
 
     """crashes the player down and shows gameover image"""
     score = crashInfo['score']
@@ -402,16 +420,23 @@ def showGameOverScreen(crashInfo):
             MAX_SCORE = (max_score, GNN.current_generation)
         else:
             MAX_SCORE = (max_score, ATTEMP)
+    
+    if not TRAINING:
+        AVG_SCORE.append(max_score)
 
     if TRAINING:
         best_player = np.argmax(fitness)
         print("BEST PLAYER:", best_player, "FITNESS:", fitness[best_player], "SCORE:", score[best_player])
         next_gen, best = GNN.next_generation(fitness, score)
-        if GNN.discount_prev_res > 0.0:
-            print("BEST PLAYER (Final):", best[0], "FITNESS:", best[2], "SCORE:", score[best[0]])
+        if GNN.discount_prev_res > 0.0 or (best != None and GNN.fitness_avg_games > 1):
+            print("BEST PLAYER (Final):", best[0], "FITNESS:", best[2], "SCORE:", best[3])
     else:
-        next_gen = True
-        print("Attemp: " + str(ATTEMP)  + "| Score:" + str(score[0]))
+        if MAX_ATTEMPS > 0:
+            next_gen = ATTEMP < MAX_ATTEMPS
+        else:
+            next_gen = True
+        print("Attemp: " + str(ATTEMP)  + " | Score:" + str(score[0]) + " | Max. score: " + str(MAX_SCORE))
+        print("Avg score: " + str(np.mean(AVG_SCORE)) + " | Std dev.: " + str(np.std(AVG_SCORE)))
 
     basex = crashInfo['basex']
 
@@ -561,10 +586,13 @@ if __name__ == '__main__':
         gnn_params = json.load(f)
         GNN = GeneticNN(gnn_params)
         TRAINING = True
+        MAX_SCORE = (GNN.best_all_time[1], GNN.best_all_time[2])
+        N_INPUTS = GNN.nn_params['layers']
     elif args.play: # play with a NN
         f = open(args.play, 'r')
         nn_params = json.load(f)
         NN = NeuralNetwork(nn_params)
+        N_INPUTS = NN.layers[0].weights.shape[1]
         TRAINING = False
     else:
         print("Error in number of params: python (-train <gnn_params_file> | -play <nn_params_file>)")

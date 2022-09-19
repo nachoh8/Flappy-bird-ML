@@ -1,0 +1,16 @@
+{
+    "population": 100,
+    "max_generation": -1,
+    "max_fitness": -1,
+    "elitism": 0.2,
+    "mutation_rate": 0.2,
+    "discount_prev_res": 0.0,
+    "fitness_avg_games": 3,
+    "checkpoint": 5,
+    "checkpoint_dir": "checkpoints/NN3",
+    "checkpoint_file": "",
+    "nn_params": {
+        "layers": [3, 5, 2, 1],
+        "activation": "sigmoid"
+    }
+}
